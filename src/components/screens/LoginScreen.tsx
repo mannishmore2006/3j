@@ -9,12 +9,18 @@ import { Button } from '../ui/Button';
 import { Icon } from '../ui/Icon';
 
 export function LoginScreen() {
-  const { login } = useApp();
+  const { login, signup } = useApp();
   const theme = useTheme();
 
+  // Mode states: login or signup
+  const [isSignUp, setIsSignUp] = useState(false);
+
+  // Form states
   const [role, setRole] = useState<'employer' | 'employee'>('employee');
   const [email, setEmail] = useState('john@company.com');
   const [password, setPassword] = useState('password123');
+  const [name, setName] = useState('');
+  const [department, setDepartment] = useState('Engineering');
   const [error, setError] = useState('');
 
   const handleQuickLogin = (selectedRole: 'employer' | 'employee') => {
@@ -28,7 +34,7 @@ export function LoginScreen() {
     setError('');
   };
 
-  const handleSignIn = () => {
+  const handleSignIn = async () => {
     if (!email || !email.includes('@')) {
       setError('Please enter a valid email address');
       return;
@@ -38,13 +44,77 @@ export function LoginScreen() {
       return;
     }
 
-    const success = login(role, email);
-    if (!success) {
-      setError(
-        role === 'employer'
-          ? 'Failed to log in as employer'
-          : 'Employee not found with this email'
-      );
+    try {
+      const response = await fetch('http://127.0.0.1:5000/api/v1/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password })
+      });
+      const data = await response.json();
+      if (response.ok) {
+        // Backend login succeeded, sync with local context by calling login with token and user payload
+        login(role, email, data.token, data.user);
+        return;
+      } else {
+        setError(data.error || 'Invalid email or password');
+        return;
+      }
+    } catch (err) {
+      console.warn('Backend offline, running local login backup...', err);
+      const success = login(role, email);
+      if (!success) {
+        setError(
+          role === 'employer'
+            ? 'Failed to log in as employer'
+            : 'Employee not found with this email'
+        );
+      }
+    }
+  };
+
+  const handleSignUp = async () => {
+    if (!name.trim()) {
+      setError('Please enter your full name');
+      return;
+    }
+    if (!email || !email.includes('@')) {
+      setError('Please enter a valid email address');
+      return;
+    }
+    if (password.length < 4) {
+      setError('Password must be at least 4 characters');
+      return;
+    }
+
+    // Try backend signup first
+    try {
+      const response = await fetch('http://127.0.0.1:5000/api/v1/auth/signup', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email,
+          password,
+          name,
+          role,
+          department: role === 'employee' ? department : undefined
+        })
+      });
+      const data = await response.json();
+      if (response.ok) {
+        // Signup succeeded, sync with local context with token and user payload
+        signup(role, email, name, role === 'employee' ? department : undefined, data.token, data.user);
+        return;
+      } else {
+        setError(data.error || 'Failed to create account');
+        return;
+      }
+    } catch (err) {
+      console.warn('Backend offline, running local-only signup backup...', err);
+      // Fallback to local context signup
+      const success = signup(role, email, name, role === 'employee' ? department : undefined);
+      if (!success) {
+        setError('Failed to create account');
+      }
     }
   };
 
@@ -65,9 +135,11 @@ export function LoginScreen() {
         </View>
 
         <Card style={styles.card}>
-          <Text style={[styles.title, { color: theme.text }]}>Sign In</Text>
+          <Text style={[styles.title, { color: theme.text }]}>
+            {isSignUp ? 'Create Account' : 'Sign In'}
+          </Text>
           <Text style={[styles.subtitle, { color: theme.textSecondary }]}>
-            Enter your credentials to access the portal
+            {isSignUp ? 'Register to get started with SyncHR' : 'Enter your credentials to access the portal'}
           </Text>
 
           {/* Role Tab Switcher */}
@@ -114,6 +186,20 @@ export function LoginScreen() {
           ) : null}
 
           {/* Fields */}
+          {isSignUp && (
+            <InputField
+              label="Full Name"
+              value={name}
+              onChangeText={(text) => {
+                setName(text);
+                setError('');
+              }}
+              placeholder="Johnathan Davis"
+              iconName="user"
+              autoCapitalize="words"
+            />
+          )}
+
           <InputField
             label="Email Address"
             value={email}
@@ -138,48 +224,93 @@ export function LoginScreen() {
             secureTextEntry={true}
           />
 
-          <View style={styles.forgotRow}>
-            <Pressable onPress={() => setError('Password reset instructions sent to your email!')}>
-              <Text style={[styles.forgotText, { color: theme.primary }]}>
-                Forgot Password?
-              </Text>
-            </Pressable>
-          </View>
+          {isSignUp && role === 'employee' && (
+            <View style={{ marginBottom: Spacing.three }}>
+              <Text style={[styles.selectorLabel, { color: theme.textSecondary }]}>Department / Class</Text>
+              <View style={styles.selectorGroup}>
+                {['Engineering', 'Design', 'HR', 'Sales'].map((d) => (
+                  <Pressable
+                    key={d}
+                    onPress={() => setDepartment(d)}
+                    style={[
+                      styles.selectorItem,
+                      { borderColor: theme.border, backgroundColor: theme.background },
+                      department === d && { borderColor: theme.primary, backgroundColor: theme.primaryLight },
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.selectorText,
+                        { color: theme.text },
+                        department === d && { color: theme.primary, fontWeight: '700' },
+                      ]}
+                    >
+                      {d}
+                    </Text>
+                  </Pressable>
+                ))}
+              </View>
+            </View>
+          )}
+
+          {!isSignUp && (
+            <View style={styles.forgotRow}>
+              <Pressable onPress={() => setError('Password reset instructions sent to your email!')}>
+                <Text style={[styles.forgotText, { color: theme.primary }]}>
+                  Forgot Password?
+                </Text>
+              </Pressable>
+            </View>
+          )}
 
           <Button
-            title={`Sign In as ${role === 'employer' ? 'Employer' : 'Employee'}`}
-            onPress={handleSignIn}
+            title={isSignUp ? 'Create Account' : `Sign In as ${role === 'employer' ? 'Employer' : 'Employee'}`}
+            onPress={isSignUp ? handleSignUp : handleSignIn}
             size="large"
             style={styles.signInButton}
           />
 
-          {/* Demo Helper Card */}
-          <View style={[styles.demoCard, { borderColor: theme.border, backgroundColor: theme.primaryLight }]}>
-            <Text style={[styles.demoTitle, { color: theme.primary }]}>
-              Demo Quick Connect
+          {/* Toggle Login/Signup mode */}
+          <View style={styles.toggleModeRow}>
+            <Text style={[styles.toggleModeText, { color: theme.textSecondary }]}>
+              {isSignUp ? 'Already have an account?' : "Don't have an account?"}
             </Text>
-            <Text style={[styles.demoText, { color: theme.textSecondary }]}>
-              Tap below to fill credentials and login instantly:
-            </Text>
-            <View style={styles.quickButtonsRow}>
-              <Button
-                title="Jane (HR / Employer)"
-                onPress={() => handleQuickLogin('employer')}
-                variant="outline"
-                size="small"
-                style={styles.quickButton}
-                textStyle={{ fontSize: 11 }}
-              />
-              <Button
-                title="John (Employee)"
-                onPress={() => handleQuickLogin('employee')}
-                variant="outline"
-                size="small"
-                style={styles.quickButton}
-                textStyle={{ fontSize: 11 }}
-              />
-            </View>
+            <Pressable onPress={() => { setIsSignUp(!isSignUp); setError(''); }}>
+              <Text style={[styles.toggleModeLink, { color: theme.primary }]}>
+                {isSignUp ? 'Sign In' : 'Sign Up'}
+              </Text>
+            </Pressable>
           </View>
+
+          {/* Demo Helper Card */}
+          {!isSignUp && (
+            <View style={[styles.demoCard, { borderColor: theme.border, backgroundColor: theme.primaryLight }]}>
+              <Text style={[styles.demoTitle, { color: theme.primary }]}>
+                Demo Quick Connect
+              </Text>
+              <Text style={[styles.demoText, { color: theme.textSecondary }]}>
+                Tap below to fill credentials and login instantly:
+              </Text>
+              <View style={styles.quickButtonsRow}>
+                <Button
+                  title="Jane (HR / Employer)"
+                  onPress={() => handleQuickLogin('employer')}
+                  variant="outline"
+                  size="small"
+                  style={styles.quickButton}
+                  textStyle={{ fontSize: 11 }}
+                />
+                <Button
+                  title="John (Employee)"
+                  onPress={() => handleQuickLogin('employee')}
+                  variant="outline"
+                  size="small"
+                  style={styles.quickButton}
+                  textStyle={{ fontSize: 11 }}
+                />
+              </View>
+            </View>
+          )}
         </Card>
       </View>
     </ScrollView>
@@ -249,6 +380,7 @@ const styles = StyleSheet.create({
     marginTop: Spacing.one,
     marginBottom: Spacing.four,
     fontWeight: '500',
+    lineHeight: 18,
   },
   tabBar: {
     flexDirection: 'row',
@@ -306,6 +438,43 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '600',
     flex: 1,
+  },
+  toggleModeRow: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: Spacing.one,
+    marginTop: Spacing.one,
+    marginBottom: Spacing.three,
+  },
+  toggleModeText: {
+    fontSize: 13,
+    fontWeight: '500',
+  },
+  toggleModeLink: {
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  selectorLabel: {
+    fontSize: 13,
+    fontWeight: '600',
+    marginBottom: Spacing.one,
+    marginLeft: Spacing.half,
+  },
+  selectorGroup: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: Spacing.two,
+  },
+  selectorItem: {
+    paddingHorizontal: Spacing.three,
+    paddingVertical: Spacing.two,
+    borderRadius: Spacing.two,
+    borderWidth: 1.5,
+  },
+  selectorText: {
+    fontSize: 13,
+    fontWeight: '600',
   },
   demoCard: {
     borderWidth: 1,

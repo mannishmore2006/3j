@@ -1,4 +1,4 @@
-import React, { createContext, useState, useContext, useEffect } from 'react';
+import React, { createContext, useState, useContext, useEffect, useCallback } from 'react';
 import { useColorScheme } from 'react-native';
 
 export interface Employee {
@@ -51,17 +51,52 @@ interface AppContextType {
   currentUser: Employee | null;
   themeMode: 'light' | 'dark';
   toggleTheme: () => void;
-  login: (role: 'employer' | 'employee', email: string) => boolean;
+  login: (role: 'employer' | 'employee', email: string, token?: string, user?: any) => boolean;
+  signup: (role: 'employer' | 'employee', email: string, name: string, department?: string, token?: string, user?: any) => boolean;
   logout: () => void;
-  checkIn: (employeeId: string, coordinates?: string) => void;
-  checkOut: (employeeId: string) => void;
-  submitLeave: (employeeId: string, type: LeaveRequest['type'], startDate: string, endDate: string, reason: string) => void;
-  approveLeave: (leaveId: string) => void;
-  rejectLeave: (leaveId: string) => void;
-  addEmployee: (name: string, email: string, department: string, role: Employee['role']) => void;
+  checkIn: (employeeId: string, coordinates?: string) => Promise<void> | void;
+  checkOut: (employeeId: string) => Promise<void> | void;
+  submitLeave: (employeeId: string, type: LeaveRequest['type'], startDate: string, endDate: string, reason: string) => Promise<void> | void;
+  approveLeave: (leaveId: string) => Promise<void> | void;
+  rejectLeave: (leaveId: string) => Promise<void> | void;
+  addEmployee: (name: string, email: string, department: string, role: Employee['role']) => Promise<void> | void;
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
+
+const API_BASE_URL = 'http://10.160.252.185:5000/api/v1';
+
+// Safe localStorage wrappers to avoid crashes on mobile (where window exists but window.localStorage is undefined)
+const safeGetItem = (key: string): string | null => {
+  try {
+    if (typeof window !== 'undefined' && window.localStorage) {
+      return window.localStorage.getItem(key);
+    }
+  } catch (e) {
+    console.warn(`Error reading ${key} from storage:`, e);
+  }
+  return null;
+};
+
+const safeSetItem = (key: string, value: string): void => {
+  try {
+    if (typeof window !== 'undefined' && window.localStorage) {
+      window.localStorage.setItem(key, value);
+    }
+  } catch (e) {
+    console.warn(`Error writing ${key} to storage:`, e);
+  }
+};
+
+const safeRemoveItem = (key: string): void => {
+  try {
+    if (typeof window !== 'undefined' && window.localStorage) {
+      window.localStorage.removeItem(key);
+    }
+  } catch (e) {
+    console.warn(`Error removing ${key} from storage:`, e);
+  }
+};
 
 const SEED_EMPLOYEES: Employee[] = [
   { id: 'EMP-01', name: 'Sarah Connor', email: 'sarah@company.com', department: 'Engineering', status: 'Active', avatar: 'SC', joinDate: '2024-01-15', role: 'Admin' },
@@ -107,11 +142,133 @@ export const AppContextProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   const [leaves, setLeaves] = useState<LeaveRequest[]>(SEED_LEAVES);
   const [currentRole, setCurrentRole] = useState<'guest' | 'employer' | 'employee'>('guest');
   const [currentUser, setCurrentUser] = useState<Employee | null>(null);
+  const [token, setToken] = useState<string | null>(null);
 
   const systemScheme = useColorScheme();
   const [themeMode, setThemeMode] = useState<'light' | 'dark'>(
     systemScheme === 'dark' ? 'dark' : 'light'
   );
+
+  // Helper to fetch with Bearer token
+  const fetchWithAuth = async (endpoint: string, options: RequestInit = {}) => {
+    const headers: any = {
+      'Content-Type': 'application/json',
+      ...options.headers,
+    };
+    const activeToken = token || safeGetItem('token');
+    if (activeToken) {
+      headers['Authorization'] = `Bearer ${activeToken}`;
+    }
+    
+    const response = await fetch(`${API_BASE_URL}${endpoint}`, {
+      ...options,
+      headers,
+    });
+    
+    if (response.status === 401 || response.status === 403) {
+      logout();
+    }
+    
+    return response;
+  };
+
+  // State fetcher from API
+  const loadData = useCallback(async (activeRole?: string, activeToken?: string) => {
+    const roleToLoad = activeRole || currentRole;
+    const tokenToLoad = token || activeToken || safeGetItem('token');
+    if (!tokenToLoad || roleToLoad === 'guest') return;
+    
+    try {
+      if (roleToLoad === 'employer') {
+        const [empRes, leaveRes, attRes] = await Promise.all([
+          fetch(`${API_BASE_URL}/hr/employees`, { headers: { 'Authorization': `Bearer ${tokenToLoad}` } }),
+          fetch(`${API_BASE_URL}/hr/leaves`, { headers: { 'Authorization': `Bearer ${tokenToLoad}` } }),
+          fetch(`${API_BASE_URL}/hr/attendance/today`, { headers: { 'Authorization': `Bearer ${tokenToLoad}` } }),
+        ]);
+        
+        if (empRes.ok && leaveRes.ok && attRes.ok) {
+          const empsData = await empRes.json();
+          const leavesData = await leaveRes.json();
+          const attData = await attRes.json();
+          
+          setEmployees(empsData);
+          setLeaves(leavesData);
+          
+          const todayStr = new Date().toISOString().split('T')[0];
+          const mappedAtt: AttendanceRecord[] = attData.map((d: any) => ({
+            id: `ATT-${d.employeeId}-${todayStr}`,
+            employeeId: d.employeeId,
+            employeeName: d.employeeName,
+            checkIn: d.checkIn,
+            checkOut: d.checkOut === '--:--' ? undefined : d.checkOut,
+            date: todayStr,
+            status: d.status,
+            coordinates: d.coordinates
+          }));
+          setAttendance(mappedAtt);
+        }
+      } else if (roleToLoad === 'employee') {
+        const [dashRes, attRes] = await Promise.all([
+          fetch(`${API_BASE_URL}/employee/dashboard`, { headers: { 'Authorization': `Bearer ${tokenToLoad}` } }),
+          fetch(`${API_BASE_URL}/employee/attendance`, { headers: { 'Authorization': `Bearer ${tokenToLoad}` } }),
+        ]);
+        
+        if (dashRes.ok && attRes.ok) {
+          const dashData = await dashRes.json();
+          const attData = await attRes.json();
+          
+          if (dashData.leaves) {
+            setLeaves(dashData.leaves);
+          }
+          
+          const mappedAtt: AttendanceRecord[] = attData.map((d: any) => ({
+            id: d.id,
+            employeeId: d.employeeId,
+            employeeName: currentUser?.name || 'Self',
+            checkIn: d.checkIn,
+            checkOut: d.checkOut || undefined,
+            date: d.date,
+            status: d.status,
+            coordinates: d.coordinates
+          }));
+          setAttendance(mappedAtt);
+        }
+      }
+    } catch (err) {
+      console.error('Failed to load data from SyncHR API:', err);
+    }
+  }, [currentRole, currentUser, token]);
+
+  // Restore session on mount
+  useEffect(() => {
+    const storedToken = safeGetItem('token');
+    const storedUserStr = safeGetItem('user');
+    const storedRole = safeGetItem('role');
+    if (storedToken && storedUserStr && storedRole) {
+      try {
+        const parsedUser = JSON.parse(storedUserStr);
+        setTimeout(() => {
+          setToken(storedToken);
+          setCurrentUser(parsedUser);
+          setCurrentRole(storedRole as any);
+          loadData(storedRole, storedToken);
+        }, 0);
+      } catch (e) {
+        console.error('Session restoration failed:', e);
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Trigger sync on token change
+  useEffect(() => {
+    if (token && currentRole !== 'guest') {
+      setTimeout(() => {
+        loadData(currentRole, token);
+      }, 0);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token, currentRole]);
 
   useEffect(() => {
     if (systemScheme) {
@@ -127,9 +284,18 @@ export const AppContextProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     setThemeMode((prev) => (prev === 'light' ? 'dark' : 'light'));
   };
 
-  const login = (role: 'employer' | 'employee', email: string): boolean => {
+  const login = (role: 'employer' | 'employee', email: string, backendToken?: string, backendUser?: any): boolean => {
+    if (backendToken && backendUser) {
+      safeSetItem('token', backendToken);
+      safeSetItem('user', JSON.stringify(backendUser));
+      safeSetItem('role', role);
+      setToken(backendToken);
+      setCurrentUser(backendUser);
+      setCurrentRole(role);
+      return true;
+    }
+
     if (role === 'employer') {
-      // In this demo, if they choose employer, log them in as HR/Admin admin profile
       const adminEmp = employees.find(e => e.role === 'Admin' || e.role === 'HR') || employees[0];
       setCurrentRole('employer');
       setCurrentUser(adminEmp);
@@ -145,21 +311,71 @@ export const AppContextProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     return false;
   };
 
+  const signup = (role: 'employer' | 'employee', email: string, name: string, department?: string, backendToken?: string, backendUser?: any): boolean => {
+    if (backendToken && backendUser) {
+      safeSetItem('token', backendToken);
+      safeSetItem('user', JSON.stringify(backendUser));
+      safeSetItem('role', role);
+      setToken(backendToken);
+      setCurrentUser(backendUser);
+      setCurrentRole(role);
+      return true;
+    }
+
+    const initials = name.split(' ').map(n => n[0]).join('').toUpperCase().substring(0, 2);
+    const dbRole = role === 'employer' ? 'HR' : 'Employee';
+    const dbDept = role === 'employer' ? 'HR' : (department || 'Engineering');
+    const newEmpId = `EMP-0${employees.length + 1}`;
+
+    const newEmp: Employee = {
+      id: newEmpId,
+      name,
+      email: email.toLowerCase(),
+      department: dbDept,
+      status: 'Active',
+      avatar: initials || 'EE',
+      joinDate: new Date().toISOString().split('T')[0],
+      role: dbRole as any,
+    };
+
+    setEmployees(prev => [...prev, newEmp]);
+    setCurrentRole(role === 'employer' ? 'employer' : 'employee');
+    setCurrentUser(newEmp);
+    return true;
+  };
+
   const logout = () => {
+    safeRemoveItem('token');
+    safeRemoveItem('user');
+    safeRemoveItem('role');
+    setToken(null);
     setCurrentRole('guest');
     setCurrentUser(null);
   };
 
-  const checkIn = (employeeId: string, coordinates?: string) => {
+  const checkIn = async (employeeId: string, coordinates?: string) => {
+    if (token) {
+      try {
+        const response = await fetchWithAuth('/employee/check-in', {
+          method: 'POST',
+          body: JSON.stringify({ coordinates }),
+        });
+        if (response.ok) {
+          loadData();
+          return;
+        }
+      } catch (err) {
+        console.error('Backend Check In error, falling back locally:', err);
+      }
+    }
+
     const today = new Date().toISOString().split('T')[0];
     const now = new Date();
     const timeStr = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
-    // Check if record already exists for today
     const existingIndex = attendance.findIndex(a => a.employeeId === employeeId && a.date === today);
 
     if (existingIndex >= 0) {
-      // Already checked in, update it
       const updated = [...attendance];
       updated[existingIndex] = {
         ...updated[existingIndex],
@@ -169,7 +385,6 @@ export const AppContextProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       };
       setAttendance(updated);
     } else {
-      // New record
       const emp = employees.find(e => e.id === employeeId);
       const newRecord: AttendanceRecord = {
         id: `ATT-${Date.now()}`,
@@ -184,7 +399,21 @@ export const AppContextProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     }
   };
 
-  const checkOut = (employeeId: string) => {
+  const checkOut = async (employeeId: string) => {
+    if (token) {
+      try {
+        const response = await fetchWithAuth('/employee/check-out', {
+          method: 'POST',
+        });
+        if (response.ok) {
+          loadData();
+          return;
+        }
+      } catch (err) {
+        console.error('Backend Check Out error, falling back locally:', err);
+      }
+    }
+
     const today = new Date().toISOString().split('T')[0];
     const now = new Date();
     const timeStr = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
@@ -202,13 +431,28 @@ export const AppContextProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     });
   };
 
-  const submitLeave = (
+  const submitLeave = async (
     employeeId: string,
     type: LeaveRequest['type'],
     startDate: string,
     endDate: string,
     reason: string
   ) => {
+    if (token) {
+      try {
+        const response = await fetchWithAuth('/employee/leaves', {
+          method: 'POST',
+          body: JSON.stringify({ type, startDate, endDate, reason }),
+        });
+        if (response.ok) {
+          loadData();
+          return;
+        }
+      } catch (err) {
+        console.error('Backend submit leave error, falling back locally:', err);
+      }
+    }
+
     const emp = employees.find(e => e.id === employeeId);
     const newRequest: LeaveRequest = {
       id: `LV-${Date.now()}`,
@@ -224,17 +468,30 @@ export const AppContextProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     setLeaves(prev => [newRequest, ...prev]);
   };
 
-  const approveLeave = (leaveId: string) => {
+  const approveLeave = async (leaveId: string) => {
+    if (token) {
+      try {
+        const response = await fetchWithAuth(`/hr/leaves/${leaveId}/status`, {
+          method: 'PATCH',
+          body: JSON.stringify({ status: 'Approved' }),
+        });
+        if (response.ok) {
+          loadData();
+          return;
+        }
+      } catch (err) {
+        console.error('Backend approve leave error, falling back locally:', err);
+      }
+    }
+
     setLeaves(prev =>
       prev.map(lv => {
         if (lv.id === leaveId) {
-          // If the approved leave starts today, update employee status to On Leave
           const today = new Date().toISOString().split('T')[0];
           if (lv.startDate <= today && lv.endDate >= today) {
             setEmployees(prevEmp =>
               prevEmp.map(e => (e.id === lv.employeeId ? { ...e, status: 'On Leave' } : e))
             );
-            // Add leave record to today's attendance
             setAttendance(prevAtt => {
               const existingIdx = prevAtt.findIndex(a => a.employeeId === lv.employeeId && a.date === today);
               if (existingIdx >= 0) {
@@ -263,13 +520,43 @@ export const AppContextProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     );
   };
 
-  const rejectLeave = (leaveId: string) => {
+  const rejectLeave = async (leaveId: string) => {
+    if (token) {
+      try {
+        const response = await fetchWithAuth(`/hr/leaves/${leaveId}/status`, {
+          method: 'PATCH',
+          body: JSON.stringify({ status: 'Rejected' }),
+        });
+        if (response.ok) {
+          loadData();
+          return;
+        }
+      } catch (err) {
+        console.error('Backend reject leave error, falling back locally:', err);
+      }
+    }
+
     setLeaves(prev =>
       prev.map(lv => (lv.id === leaveId ? { ...lv, status: 'Rejected' } : lv))
     );
   };
 
-  const addEmployee = (name: string, email: string, department: string, role: Employee['role']) => {
+  const addEmployee = async (name: string, email: string, department: string, role: Employee['role']) => {
+    if (token) {
+      try {
+        const response = await fetchWithAuth('/hr/employees', {
+          method: 'POST',
+          body: JSON.stringify({ name, email, department, role }),
+        });
+        if (response.ok) {
+          loadData();
+          return;
+        }
+      } catch (err) {
+        console.error('Backend add employee error, falling back locally:', err);
+      }
+    }
+
     const initials = name.split(' ').map(n => n[0]).join('').toUpperCase().substring(0, 2);
     const newEmp: Employee = {
       id: `EMP-0${employees.length + 1}`,
@@ -296,6 +583,7 @@ export const AppContextProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         themeMode,
         toggleTheme,
         login,
+        signup,
         logout,
         checkIn,
         checkOut,
