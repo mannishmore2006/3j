@@ -1,56 +1,172 @@
-# Welcome to your Expo app 👋
+# SyncHR 🚀 | Modern Workplace & SaaS HR Management Portal
 
-This is an [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).
+SyncHR is a sleek, modern, and responsive SaaS workplace management platform designed for managing attendance, check-ins, and leaves. It consists of a **React Native (Expo)** mobile-web frontend and a **Node.js/Express** backend backed by a **Prisma/SQLite** database.
 
-## Get started
+---
 
-1. Install dependencies
+## 📸 Screenshots Gallery
 
-   ```bash
-   npm install
-   ```
+Here is a comprehensive visual walkthrough of the SyncHR application portals:
 
-2. Start the app
+### 🔐 Authentication Portal
+| **Unified Portal Login** |
+|:---:|
+| ![Login Portal](screenshots/login_screen.png) |
 
-   ```bash
-   npx expo start
-   ```
+### 👤 Employee Mobile App
+| **Dashboard** | **Punch In/Out** | **Request Leave** | **Attendance History** |
+|:---:|:---:|:---:|:---:|
+| ![Employee Dashboard](screenshots/employee_dashboard.png) | ![Punch In/Out](screenshots/employee_punch.png) | ![Request Leave](screenshots/employee_leave_request.png) | ![Attendance Logs](screenshots/employee_attendance_logs.png) |
 
-In the output, you'll find options to open the app in a
+### 🏢 Employer / HR Portal
+| **Live HR Dashboard** | **Staff Registry** | **Pending Approvals** | **Processed Leave Logs** |
+|:---:|:---:|:---:|:---:|
+| ![HR Dashboard](screenshots/hr_dashboard.png) | ![Staff Registry](screenshots/hr_staff_registry.png) | ![Pending Leaves](screenshots/hr_leave_approvals_pending.png) | ![Processed Leaves](screenshots/hr_leave_approvals_processed.png) |
 
-- [development build](https://docs.expo.dev/develop/development-builds/introduction/)
-- [Android emulator](https://docs.expo.dev/workflow/android-studio-emulator/)
-- [iOS simulator](https://docs.expo.dev/workflow/ios-simulator/)
-- [Expo Go](https://expo.dev/go), a limited sandbox for trying out app development with Expo
+---
 
-You can start developing by editing the files inside the **app** directory. This project uses [file-based routing](https://docs.expo.dev/router/introduction).
+## ✨ Features
 
-## Get a fresh project
+### 👤 Employee Portal
+* **One-Tap Punch**: Easy check-in/out logging with GPS coordinates (simulated).
+* **Leave Requests**: Request Paid, Sick, Casual, or Unpaid leaves with real-time status tracking.
+* **Attendance History**: Access past check-in/out times, logs, and active statuses.
+* **Profile Settings**: View employee details, department classification, and join dates.
 
-When you're ready, run:
+### 🏢 Employer/HR Portal
+* **Live Analytics**: View live statistics on active staff, on-leave employees, and pending leave approvals.
+* **Staff Registry**: Complete CRUD interface for registering and managing workforce profiles.
+* **Leave Approvals**: Instant approval or rejection of employee leave request tickets.
+* **Daily Logs**: Audit and view attendance records of all workers for the day.
 
-```bash
-npm run reset-project
+---
+
+## 🛠️ Technology Stack
+
+* **Frontend**: React Native, Expo (v56), React 19, TypeScript, Expo Router (file-based routing).
+* **Backend**: Node.js, Express, TypeScript, JWT (JSON Web Tokens), Bcrypt encryption.
+* **Database & ORM**: Prisma ORM with a local SQLite database setup.
+
+---
+
+## 🏛️ System Architecture
+
+### Component Diagram
+
+```mermaid
+graph TD
+    subgraph Frontend [React Native Client - Expo Web]
+        App[App Shell]
+        Ctx[AppContext Provider]
+        UI[Screens & UI Components]
+        App --> Ctx
+        Ctx --> UI
+    end
+
+    subgraph Backend [Express API Server]
+        Auth[Auth Controller]
+        Emp[Employee Controller]
+        HR[Employer/HR Controller]
+        Prisma[Prisma Client]
+        
+        Auth --> Prisma
+        Emp --> Prisma
+        HR --> Prisma
+    end
+
+    subgraph Database [Storage Layer]
+        SQLite[(SQLite DB: dev.db)]
+    end
+
+    UI <-->|JSON over HTTP| Backend
+    Prisma <--> SQLite
 ```
 
-This command will move the starter code to the **app-example** directory and create a blank **app** directory where you can start developing.
+### Directory Structure
 
-### Other setup steps
+```
+StickerSmash/
+├── assets/                 # App icons, logos, and presentation assets
+├── backend/                # Node.js/Express Backend Server
+│   ├── prisma/             # Prisma Schema & Database setup
+│   │   ├── schema.prisma   # SQLite tables configuration
+│   │   ├── dev.db          # Database file
+│   │   └── seed.ts         # Initial mock data seeder
+│   └── src/                # Backend API source files
+│       ├── controllers/    # Route controllers (Auth, Employee, HR)
+│       └── server.ts       # Express server entrypoint
+├── screenshots/            # Showcase screenshots for GitHub
+├── src/                    # Expo Mobile/Web Frontend
+│   ├── app/                # Expo Router files (_layout, index, explore)
+│   ├── components/         # Reusable widgets and screen layouts
+│   │   ├── screens/        # Main application screens (Login, Dashboards)
+│   │   └── ui/             # Core visual primitives (Buttons, Cards, Inputs)
+│   ├── constants/          # Styles and HSL color theme configuration
+│   ├── context/            # Global context (Authentication, State Sync)
+│   └── hooks/              # Custom React hooks (useTheme)
+├── package.json            # Root configuration and dependencies
+└── tsconfig.json           # Frontend TypeScript path mappings
+```
 
-- To set up ESLint for linting, run `npx expo lint`, or follow our guide on ["Using ESLint and Prettier"](https://docs.expo.dev/guides/using-eslint/)
-- If you'd like to set up unit testing, follow our guide on ["Unit Testing with Jest"](https://docs.expo.dev/develop/unit-testing/)
-- Learn more about the TypeScript setup in this template in our guide on ["Using TypeScript"](https://docs.expo.dev/guides/typescript/)
+---
 
-## Learn more
+## 💾 Database Schema
 
-To learn more about developing your project with Expo, look at the following resources:
+The SQLite schema uses the following relational structure configured via Prisma:
 
-- [Expo documentation](https://docs.expo.dev/): Learn fundamentals, or go into advanced topics with our [guides](https://docs.expo.dev/guides).
-- [Learn Expo tutorial](https://docs.expo.dev/tutorial/introduction/): Follow a step-by-step tutorial where you'll create a project that runs on Android, iOS, and the web.
+* **User**: Credential records containing JWT identity authentication (roles: `Employee`, `HR`, `Admin`).
+* **Employee**: Complete profile details linked to the `User` account.
+* **Attendance**: Daily punch-in (`checkIn`), punch-out (`checkOut`) coordinates, dates, and active status logs.
+* **Leave**: Submissions for Paid, Sick, Casual, and Unpaid leave requests with approval status tracker.
+* **Holiday**: National corporate calendar lookup registry.
 
-## Join the community
+---
 
-Join our community of developers creating universal apps.
+## 🚀 Getting Started
 
-- [Expo on GitHub](https://github.com/expo/expo): View our open source platform and contribute.
-- [Discord community](https://chat.expo.dev): Chat with Expo users and ask questions.
+### 1. Prerequisite Setup
+Ensure you have [Node.js](https://nodejs.org) installed on your machine.
+
+### 2. Install Dependencies
+Install packages for both the frontend and backend:
+
+```bash
+# Install root (Frontend) dependencies
+npm install
+
+# Install backend dependencies
+cd backend
+npm install
+cd ..
+```
+
+### 3. Run the Backend API Server
+Configure the environment variables in `backend/.env` (default template is configured with SQLite), then start the server:
+
+```bash
+cd backend
+# (Optional) Seed the database with sample profiles:
+# npm run prisma:migrate
+# npm run prisma:seed
+
+# Start node server in dev mode
+npm run dev
+```
+The server will boot on `http://localhost:5000`.
+
+### 4. Run the Expo Web Application
+In the root directory, start the Metro Bundler web server:
+
+```bash
+npm run web
+```
+The application will launch on [http://localhost:8081](http://localhost:8081).
+
+---
+
+## 💡 Quick Login Demo Accounts
+Use the quick connect buttons on the login screen, or sign in using:
+* **HR Admin**: `jane@company.com` / `password123`
+* **Employee**: `john@company.com` / `password123`
+
+

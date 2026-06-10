@@ -64,7 +64,7 @@ interface AppContextType {
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
 
-const API_BASE_URL = 'http://10.160.252.185:5000/api/v1';
+const API_BASE_URL = 'http://localhost:5000/api/v1';
 
 // Safe localStorage wrappers to avoid crashes on mobile (where window exists but window.localStorage is undefined)
 const safeGetItem = (key: string): string | null => {
